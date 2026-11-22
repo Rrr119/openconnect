@@ -46,6 +46,7 @@ EXTRA_DIST = certs/ca.pem certs/ca-key.pem certs/user-cert.pem $(USER_KEYS) $(US
 	configs/user-cert.prm configs/server-cert.prm \
 	softhsm2.conf.in softhsm ns.sh configs/test-dtls-psk.config \
 	scripts/vpnc-script scripts/vpnc-script-detect-disconnect \
+	scripts/oidc-mock-server.py auth-oidc \
 	suppressions.lsan
 
 dist_check_SCRIPTS = autocompletion
@@ -78,6 +79,10 @@ PKCS11_TOKENS += openconnect-test3
 endif # OPENCONNECT_OPENSSL
 endif # TEST_PKCS11
 endif # HAVE_CWRAP
+
+if TEST_OIDC
+dist_check_SCRIPTS += auth-oidc
+endif
 
 TESTS_ENVIRONMENT = srcdir="$(srcdir)" \
 	top_builddir="$(top_builddir)" \

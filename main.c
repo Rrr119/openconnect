@@ -2711,8 +2711,14 @@ static void init_token(struct openconnect_info *vpninfo,
 		switch (ret) {
 		case 0:
 			return;
+		case -EINVAL:
+			fprintf(stderr, _("OIDC token is empty or invalid; provide a token with --token-secret or a non-empty file via --token-secret=@FILENAME\n"));
+			exit(1);
 		case -ENOENT:
 			fprintf(stderr, _("Can't open oidc file\n"));
+			exit(1);
+		case -ENOMEM:
+			fprintf(stderr, _("Out of memory while loading oidc token\n"));
 			exit(1);
 		default:
 			fprintf(stderr, _("General failure in oidc token\n"));

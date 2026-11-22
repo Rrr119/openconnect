@@ -531,6 +531,15 @@ used. If not provided, the first OATH credential found on the device will be
 used.
 
 For OIDC the secret is the bearer token to be used.
+The token is sent as an RFC 6750
+.B "Authorization: Bearer"
+HTTP header once the server challenges with
+.BR "WWW-Authenticate: Bearer".
+Leading and trailing whitespace (including a trailing newline when the token
+is read from a file) is stripped, and an empty or whitespace-only token is
+rejected. If the server rejects the token, OpenConnect reports the failure
+and hints at the common causes (expired, invalid or insufficiently scoped
+token).
 
 .IR FILENAME ,
 if specified, can contain any of the above strings.  Or, it can contain a

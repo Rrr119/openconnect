@@ -1,0 +1,17 @@
+{
+  "root": "/home/dev/feedback/uid32245",
+  "B": "/home/dev/feedback/uid32245",
+  "sha": "c026f1f5ccedb56405fb8bcc98440d0bf694ec46",
+  "wslDistro": "Ubuntu-26.04",
+  "source": {
+    "owner": "openconnect",
+    "repo": "openconnect",
+    "sha": "c026f1f5ccedb56405fb8bcc98440d0bf694ec46"
+  },
+  "fork": {
+    "owner": "Rrr119",
+    "repo": "openconnect",
+    "cloneUrl": "https://github.com/Rrr119/openconnect.git"
+  },
+  "at": "2026-11-22T01:55:00.705Z"
+}

@@ -614,6 +614,10 @@ if test "$pkcs11_support" != ""; then
 fi
 AM_CONDITIONAL(TEST_PKCS11, [ test "$test_pkcs11" = "yes" ])
 
+# Python 3 is needed for the TLS mock gateway used by the OIDC test.
+AC_CHECK_PROG([have_python3], [python3], [yes])
+AM_CONDITIONAL([TEST_OIDC], [ test "$have_python3" = "yes" ])
+
 # The test is OpenSSL-only for now.
 AM_CONDITIONAL(CHECK_DTLS, [ test "$ssl_library" = "OpenSSL" ])
 

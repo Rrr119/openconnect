@@ -1,0 +1,196 @@
+#!/bin/sh
+#
+# Copyright (C) 2026 Red Hat, Inc.
+#
+# This file is part of openconnect.
+#
+# This is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public License
+# as published by the Free Software Foundation; either version 2.1 of
+# the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>
+
+# Interoperability tests for OIDC / RFC 6750 HTTP Bearer authentication.
+# A local TLS mock gateway is driven through three server behaviours:
+#   bearer -> challenges with WWW-Authenticate: Bearer, accepts the
+#             correct token (exercised both inline and from a file that
+#             has a trailing newline, which must be stripped).
+#   reject -> always answers 401 to exercise the client diagnostics.
+#   open   -> never challenges, to verify backwards-compatible behaviour.
+# A final check verifies that an empty/whitespace token is rejected locally.
+
+srcdir=${srcdir:-.}
+top_builddir=${top_builddir:-..}
+
+if ! command -v python3 >/dev/null 2>&1; then
+	echo "python3 is required for the OIDC interop test"
+	exit 77
+fi
+
+OPENCONNECT="${OPENCONNECT:-${top_builddir}/openconnect}${EXEEXT}"
+SERVER="${srcdir}/scripts/oidc-mock-server.py"
+CERT="${srcdir}/certs/server-cert.pem"
+KEY="${srcdir}/certs/server-key.pem"
+SERVERCERT=d66b507ae074d03b02eafca40d35f87dd81049d3
+TOKEN="good-token-12345"
+
+# Do not let an ambient HTTP/HTTPS proxy intercept the loopback test traffic.
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+NO_PROXY="127.0.0.1,localhost"
+no_proxy="127.0.0.1,localhost"
+export NO_PROXY no_proxy
+
+fail() {
+	pid=$1
+	shift
+	echo "Failure: $1" >&2
+	test -n "$pid" && kill "$pid" 2>/dev/null
+	cleanup
+	exit 1
+}
+
+PORT=8443
+WORKDIR="oidc.$$.tmp"
+mkdir -p "$WORKDIR"
+
+start_server() {
+	mode=$1
+	out=$2
+	python3 "$SERVER" "$mode" "$PORT" "$out" "$CERT" "$KEY" "$TOKEN" &
+	SRVPID=$!
+	sleep 1
+}
+
+stop_server() {
+	kill "$SRVPID" 2>/dev/null
+	wait "$SRVPID" 2>/dev/null
+}
+
+cleanup() {
+	test -n "$SRVPID" && stop_server
+	test -d "$WORKDIR" && rm -rf "$WORKDIR"
+}
+trap cleanup 1 2 15
+
+auth_value() {
+	python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("authorization") or "")' "$1"
+}
+
+status_value() {
+	python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("last_status"))' "$1"
+}
+
+malformed_value() {
+	python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("malformed"))' "$1"
+}
+
+echo "Testing OIDC Bearer authentication"
+
+# --- Server 1: Bearer-challenging gateway, correct inline token --------
+OUT="$WORKDIR/seen1.json"
+LOG="$WORKDIR/oc1.log"
+start_server bearer "$OUT"
+
+echo -n "  correct inline token is accepted... "
+if ! "$OPENCONNECT" --token-mode=oidc --token-secret="$TOKEN" \
+	--servercert="$SERVERCERT" --cookieonly \
+	"https://127.0.0.1:${PORT}" >"$LOG" 2>&1; then
+	# The mock does not speak the full CSTP protocol, so --cookieonly
+	# cannot complete; the assertion below is what actually matters.
+	:
+fi
+got=$(auth_value "$OUT")
+if test "$got" != "Bearer $TOKEN"; then
+	fail "$SRVPID" "expected 'Bearer $TOKEN', got '$got'"
+fi
+if ! grep -q "Attempting HTTP Bearer authentication" "$LOG"; then
+	fail "$SRVPID" "missing Bearer attempt diagnostic"
+fi
+stop_server
+echo ok
+
+# --- Server 2: gateway that always rejects -----------------------------
+OUT="$WORKDIR/seen2.json"
+LOG="$WORKDIR/oc2.log"
+start_server reject "$OUT"
+
+echo -n "  rejected token reports a clear diagnostic... "
+"$OPENCONNECT" --token-mode=oidc --token-secret="$TOKEN" \
+	--servercert="$SERVERCERT" --cookieonly \
+	"https://127.0.0.1:${PORT}" >"$LOG" 2>&1
+if test $? -eq 0; then
+	fail "$SRVPID" "connection unexpectedly succeeded against rejecting server"
+fi
+if ! grep -q "HTTP Bearer authentication failed" "$LOG"; then
+	fail "$SRVPID" "missing Bearer rejection diagnostic"
+fi
+stop_server
+echo ok
+
+# --- Server 3: trailing-newline token file against Bearer gateway ------
+OUT="$WORKDIR/seen3.json"
+LOG="$WORKDIR/oc3.log"
+TOKFILE="$WORKDIR/token.txt"
+printf '%s\n' "$TOKEN" >"$TOKFILE"
+start_server bearer "$OUT"
+
+echo -n "  token file with trailing newline is trimmed... "
+"$OPENCONNECT" --token-mode=oidc --token-secret="@$TOKFILE" \
+	--servercert="$SERVERCERT" --cookieonly \
+	"https://127.0.0.1:${PORT}" >"$LOG" 2>&1
+got=$(auth_value "$OUT")
+if test "$got" != "Bearer $TOKEN"; then
+	fail "$SRVPID" "expected trimmed 'Bearer $TOKEN', got '$got'"
+fi
+if test "$(malformed_value "$OUT")" != "False"; then
+	fail "$SRVPID" "token file newline produced a malformed Authorization header"
+fi
+stop_server
+echo ok
+
+# --- Server 3b: open gateway never challenges (backwards compatible) ---
+OUT="$WORKDIR/seen3b.json"
+LOG="$WORKDIR/oc3b.log"
+start_server open "$OUT"
+
+echo -n "  gateway without a Bearer challenge still answers... "
+"$OPENCONNECT" --token-mode=oidc --token-secret="$TOKEN" \
+	--servercert="$SERVERCERT" --cookieonly \
+	"https://127.0.0.1:${PORT}" >"$LOG" 2>&1
+# No Authorization header must be sent when the server does not ask.
+got=$(auth_value "$OUT")
+if test "$got" != ""; then
+	fail "$SRVPID" "unexpected Authorization header '$got' on open gateway"
+fi
+status=$(status_value "$OUT")
+if test "$status" != "200"; then
+	fail "$SRVPID" "open gateway did not return HTTP 200 (got $status)"
+fi
+stop_server
+echo ok
+
+# --- Client-side validation: empty token is refused --------------------
+echo -n "  empty token is rejected with a diagnostic... "
+"$OPENCONNECT" --token-mode=oidc --token-secret="   " \
+	--servercert="$SERVERCERT" --cookieonly \
+	"https://127.0.0.1:${PORT}" >"$WORKDIR/oc4.log" 2>&1
+if test $? -eq 0; then
+	echo "Failure: empty OIDC token was unexpectedly accepted" >&2
+	cleanup
+	exit 1
+fi
+if ! grep -q "OIDC token is empty or invalid" "$WORKDIR/oc4.log"; then
+	echo "Failure: missing empty-token diagnostic" >&2
+	cleanup
+	exit 1
+fi
+echo ok
+
+cleanup
+exit 0

@@ -200,10 +200,17 @@ static int bearer_authorization(struct openconnect_info *vpninfo, int proxy,
 		return -EINVAL;
 	}
 
-	if (!bearer_token)
+	if (!bearer_token) {
+		vpn_progress(vpninfo, PRG_ERR,
+			     _("Server '%s' requested HTTP Bearer authentication but no OIDC token is configured\n"),
+			     vpninfo->hostname);
 		return -EINVAL;
+	}
 
 	if (auth_state->state == AUTH_IN_PROGRESS) {
+		vpn_progress(vpninfo, PRG_ERR,
+			     _("HTTP Bearer authentication failed: the OIDC token was rejected by server '%s' (it may be invalid, expired, or have insufficient scope)\n"),
+			     vpninfo->hostname);
 		auth_state->state = AUTH_FAILED;
 		return -EAGAIN;
 	}
